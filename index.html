@@ -1,0 +1,321 @@
+<!-- ========================================================= -->
+<!-- 🔵🔵🔵  HTML SECTION (START) — ALL HTML CODE BELOW  🔵🔵🔵 -->
+<!-- ========================================================= -->
+<!-- ============================= -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Syllable Splitter — Interactive</title>
+  <!-- ========================================================= -->
+<!-- 🟢🟢🟢  CSS SECTION (START) — ALL CSS STYLES BELOW  🟢🟢🟢 -->
+<!-- ========================================================= -->
+<!--            CSS CODE          -->
+<!-- ============================= -->
+<style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#60a5fa;--muted:#94a3b8}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:linear-gradient(180deg,#071024 0%, #071a2a 100%);color:#e6eef8}
+    .app{max-width:980px;margin:32px auto;padding:20px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border-radius:12px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+    h1{margin:0 0 12px;font-size:20px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+    textarea{flex:1;min-height:64px;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
+    input[type=file]{display:inline-block}
+    button{background:var(--accent);border:none;color:#022544;padding:8px 12px;border-radius:8px;font-weight:600;cursor:pointer}
+    .small{padding:6px 10px;font-size:14px}
+    .muted{color:var(--muted);font-size:13px}
+    .action-area{margin-top:18px;padding:18px;border-radius:10px;background:rgba(255,255,255,0.02);min-height:160px}
+    .sentence{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    .word{position:relative;display:inline-block;padding:8px 12px;border-radius:8px;background:linear-gradient(90deg,#0b2540,#083049);cursor:pointer;user-select:none;transition:transform .25s ease, box-shadow .25s ease}
+    .word.showing{box-shadow:0 10px 30px rgba(3,120,255,0.12);transform:translateY(-4px)}
+    .word .text{display:inline-block;color:#eaf6ff;font-weight:700;letter-spacing:.5px}
+    .word .syllables{
+        position:absolute;
+        left:0;
+        top:0;
+        width:100%;
+        height:100%;
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        gap:6px;
+        pointer-events:none;
+      }
+          .syll{padding:6px 8px;border-radius:6px;background:linear-gradient(90deg,#ffd6a5,#ffb4a2);color:#2b0a00;font-weight:700;transform-origin:center;opacity:0;transform:translateY(0) scale(.9)}
+    /* animation when splitting: drop & scatter */
+    .splitted .syll{pointer-events:auto}
+    .syll.anim{animation:drop .6s cubic-bezier(.2,.9,.2,1) forwards}
+    .syll.reverse{animation:rise .45s cubic-bezier(.2,.9,.2,1) forwards}
+
+    @keyframes drop{
+      0%{opacity:0;transform:translateY(-8px) scale(.85)}
+      60%{opacity:1;transform:translateY(6px) scale(1.05)}
+      100%{opacity:1;transform:translateY(18px) scale(1)}
+    }
+    @keyframes rise{
+      0%{opacity:1;transform:translateY(18px) scale(1)}
+      100%{opacity:0;transform:translateY(-6px) scale(.9)}
+    }
+    .help{margin-top:12px;font-size:13px}
+    .controls .status{align-self:center}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Syllable Splitter — interactive demo</h1>
+    <div class="controls">
+      <textarea id="textIn" placeholder="Type or paste a sentence here and press Enter (or click Split) ..."></textarea>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input id="imgIn" type="file" accept="image/*" />
+        <button id="ocrBtn" class="small">Extract text from image</button>
+        <button id="splitBtn" class="small">Split / Start</button>
+        <button id="pauseBtn" class="small">Pause</button>
+        <button id="resetBtn" class="small">Reset</button>
+        <div class="status muted" id="status">Ready</div>
+      </div>
+    </div>
+    <div class="action-area">
+      <div class="sentence" id="sentence"></div>
+    </div>
+    <div class="help muted">Usage: Type or paste text, press Enter or click <strong>Split / Start</strong>. You can also upload an image and click <strong>Extract text</strong> (uses Tesseract.js). Words will appear one-by-one; click any word to toggle syllable split/unsplit.</div>
+  </div>
+
+  <!-- Tesseract CDN (client-side OCR) -->
+  <script src="https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
+  <!-- ========================================================= -->
+<!-- 🟠🟠🟠  JAVASCRIPT SECTION (START) — ALL JS BELOW  🟠🟠🟠 -->
+<!-- ========================================================= -->
+<!--        JAVASCRIPT CODE       -->
+<!-- ============================= -->
+<script>
+    // Simple syllable approximation algorithm (heuristic) — not perfect but works for many words
+    function syllabify(word){
+      // Improved heuristic syllabifier using common English rules:
+      // - Uses vowel positions (a,e,i,o,u,y)
+      // - Applies Maximal Onset Principle with a list of allowed onset clusters
+      // - Handles common digraphs (sh, ch, th, ph, ck, qu, ng)
+      // - Avoids splitting vowel clusters and keeps consonant clusters together when they form legal onsets
+      if(!word) return [''];
+      // preserve original for slicing, but operate on lower-case for tests
+      const original = word;
+      const w = word.replace(/[^A-Za-z']/g,''); // remove punctuation for analysis but keep indices by referencing original slices
+      const lower = w.toLowerCase();
+      const V = 'aeiouy';
+      const digraphs = ['ch','sh','th','ph','wh','ck','ng','qu','gh','wr','kn'];
+      const allowedOnsets = ['bl','br','cl','cr','dr','fr','fl','gl','gr','pl','pr','tr','tw','sk','sl','sm','sn','sp','st','sw','str','spl','spr','scr','shr','thr'];
+
+      // collect vowel indices relative to 'lower'
+      let vowelIdx = [];
+      for(let i=0;i<lower.length;i++) if(V.indexOf(lower[i])>=0) vowelIdx.push(i);
+      // handle silent trailing 'e' heuristically: if last letter is 'e' and there are other vowels, ignore last vowel index
+      if(lower.length>2 && lower.endsWith('e') && vowelIdx.length>1 && vowelIdx[vowelIdx.length-1]===lower.length-1){
+        vowelIdx.pop();
+      }
+      if(vowelIdx.length===0) return [original];
+      if(vowelIdx.length===1) return [original];
+
+      // determine split positions between vowels
+      let splits = [];
+      for(let vi=0; vi<vowelIdx.length-1; vi++){
+        const vpos = vowelIdx[vi];
+        const nextV = vowelIdx[vi+1];
+        const between = lower.slice(vpos+1, nextV); // consonants between vowels
+        if(between.length===0){
+          // vowel cluster (ea, oi etc.) -> no split
+          continue;
+        } else if(between.length===1){
+          // single consonant -> split before consonant (V-CV)
+          splits.push(vpos+1);
+        } else if(between.length===2){
+          const pair = between;
+          if(digraphs.includes(pair)){
+            // treat as single consonant (attach to vowel) => split before the pair
+            splits.push(vpos+1);
+          } else {
+            // split between the two consonants (V - C.CV)
+            splits.push(vpos+2);
+          }
+        } else {
+          // 3+ consonants: try to leave a legal onset on the next syllable
+          const cons = between;
+          // find longest suffix of 'cons' that is an allowed onset
+          let found = false;
+          for(let k=0;k<cons.length;k++){
+            const onset = cons.slice(k);
+            if(allowedOnsets.includes(onset)){
+              splits.push(vpos+1+k);
+              found = true; break;
+            }
+          }
+          if(!found){
+            // default: split after first consonant
+            splits.push(vpos+2);
+          }
+        }
+      }
+
+      // build syllable parts using splits (indices relative to 'lower'); map to original by character positions
+      // We'll map positions back onto original by scanning original and matching letters (skip punctuation)
+      // Create an index map from cleaned string positions to original positions
+      let mapCleanToOrig = [];
+      let ci = 0;
+      for(let oi=0; oi<original.length; oi++){
+        const ch = original[oi];
+        if(/[A-Za-z']/.test(ch)){
+          mapCleanToOrig[ci++] = oi;
+        }
+      }
+
+      let parts = [];
+      let startClean = 0;
+      for(let s of splits){
+        const startOrig = mapCleanToOrig[startClean] ?? 0;
+        const endOrig = (mapCleanToOrig[s] !== undefined) ? mapCleanToOrig[s] : original.length;
+        parts.push(original.slice(startOrig, endOrig));
+        startClean = s;
+      }
+      // final part
+      const lastStartOrig = mapCleanToOrig[startClean] ?? 0;
+      parts.push(original.slice(lastStartOrig));
+
+      // cleanup
+      parts = parts.map(p=>p).filter(p=>p.length>0);
+      if(parts.length===0) return [original];
+      return parts;
+    }
+
+    // DOM refs
+    const textIn = document.getElementById('textIn');
+    const splitBtn = document.getElementById('splitBtn');
+    const sentenceEl = document.getElementById('sentence');
+    const imgIn = document.getElementById('imgIn');
+    const ocrBtn = document.getElementById('ocrBtn');
+    const status = document.getElementById('status');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+
+    let words = [];
+    let index = 0;
+    let timer = null;
+    let running = false;
+
+    function setStatus(t){ status.textContent = t; }
+
+    function reset(){
+      words = []; index = 0; running = false; clearInterval(timer); sentenceEl.innerHTML = ''; setStatus('Reset');
+    }
+
+    function prepare(text){
+      reset();
+      // split into words preserving punctuation as part of word
+      words = text.trim().split(/\s+/).filter(Boolean);
+      setStatus(words.length + ' words ready');
+    }
+
+    function startReveal(interval=600){
+      if(words.length===0) return setStatus('No words to show');
+      running = true; setStatus('Running...');
+      timer = setInterval(()=>{
+        if(index >= words.length){ clearInterval(timer); running=false; setStatus('All shown'); return; }
+        showWord(words[index]); index++;
+      }, interval);
+    }
+
+    function pause(){ running = !running; if(!running){ clearInterval(timer); setStatus('Paused'); } else { startReveal(); } }
+
+    function showWord(wordText){
+      const w = document.createElement('div');
+      w.className = 'word';
+      const t = document.createElement('span'); t.className='text'; t.textContent = wordText;
+      w.appendChild(t);
+      sentenceEl.appendChild(w);
+      // visual show animation
+      requestAnimationFrame(()=>{ w.classList.add('showing'); setTimeout(()=>w.classList.remove('showing'),450); });
+
+      // attach toggle
+      w.addEventListener('click',()=>toggleSplit(w, wordText));
+    }
+
+    async function toggleSplit(el, original){
+      if(el.classList.contains('splitted')){
+        // unsplit: animate syllables up and remove
+        const sylls = el.querySelectorAll('.syll');
+        sylls.forEach((s,i)=>{
+          s.classList.remove('anim'); s.classList.add('reverse');
+          s.style.animationDelay = (i*40)+'ms';
+        });
+        // remove after animation
+        setTimeout(()=>{
+          const sylWrap = el.querySelector('.syllables');
+          if(sylWrap) el.removeChild(sylWrap);
+          el.classList.remove('splitted');
+        },500);
+      } else {
+        // split into syllables and animate
+        const syls = syllabify(original.replace(/[.,!?;:]/g,''));
+        const wrap = document.createElement('div'); wrap.className='syllables';
+        syls.forEach((s,i)=>{
+          const span = document.createElement('div'); span.className='syll'; span.textContent = s;
+          // stagger animation
+          span.style.animationDelay = (i*80)+'ms';
+          wrap.appendChild(span);
+          // interactive: clicking a syllable copies it to clipboard
+          span.addEventListener('click',(ev)=>{ ev.stopPropagation(); navigator.clipboard?.writeText(span.textContent); setStatus('Copied "'+span.textContent+'"'); });
+        });
+        el.appendChild(wrap);
+        // trigger animations
+        requestAnimationFrame(()=>{
+          const spans = wrap.querySelectorAll('.syll');
+          spans.forEach((s,i)=>{
+            s.classList.add('anim');
+            // small scatter effect using transform translateX
+            const dir = (i%2===0? -1: 1);
+            s.style.transform = `translateX(${dir*6}px)`;
+            s.style.transition = 'transform .45s ease';
+            setTimeout(()=>{ s.style.transform = `translateX(${dir*18}px)`; }, 40 + i*50);
+          });
+          el.classList.add('splitted');
+        });
+      }
+    }
+
+    // handle Enter key to submit
+    textIn.addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); splitBtn.click(); }
+    });
+
+    splitBtn.addEventListener('click', ()=>{
+      const txt = textIn.value.trim();
+      if(!txt) return setStatus('Please type or extract text first');
+      prepare(txt);
+      // show one immediately then start timer
+      showWord(words[0]); index = 1;
+      if(words.length>1) startReveal(700);
+    });
+
+    pauseBtn.addEventListener('click', ()=>{
+      if(!running) { if(index<words.length) { startReveal(700); } } else { pause(); }
+    });
+
+    resetBtn.addEventListener('click', reset);
+
+    // OCR using Tesseract
+    ocrBtn.addEventListener('click', async ()=>{
+      const file = imgIn.files[0];
+      if(!file) return setStatus('Please choose an image first');
+      setStatus('Running OCR...');
+      const imgURL = URL.createObjectURL(file);
+      try{
+        const { data: { text } } = await Tesseract.recognize(imgURL, 'eng', { logger: m => {/*console.log(m)*/} });
+        textIn.value = text.replace(/\n+/g,' ').trim();
+        setStatus('Text extracted. Press Split/Start');
+      }catch(err){ console.error(err); setStatus('OCR failed: '+err.message); }
+    });
+
+    // small feature: tap any displayed word to toggle split (already attached when showing)
+
+    // initialize
+    setStatus('Ready');
+  </script>
+</body>
+</html>
